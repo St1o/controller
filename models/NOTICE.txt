@@ -1,0 +1,3 @@
+hand_landmarker.task - модель отслеживания руки MediaPipe Hand Landmarker (Google), лицензия Apache License 2.0.
+Источник: https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
+Если файл удалить, программа скачает его заново при первом запуске.
