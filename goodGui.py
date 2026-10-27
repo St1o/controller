@@ -27,6 +27,7 @@ QLabel { color: #000; background: transparent; }
 #logo_text { font-family: "Segoe UI Light", "Segoe UI", "Helvetica Neue", Arial, sans-serif; font-size: 28pt; font-weight: 300; }
 #about_label { font-size: 13pt; }
 #status_label { color: #a02020; }
+#stats_label { color: #707070; font-size: 9pt; }
 QPushButton#pushButton { font-size: 12pt; }
 QPushButton#menu_item, QPushButton#pushButton { border: none; background: transparent; color: #000; text-align: left; }
 QPushButton#menu_item:hover, QPushButton#pushButton:hover { background-color: rgba(255, 255, 255, 90); }
@@ -160,6 +161,13 @@ class Ui_MainWindow(object):
         button.setStyleSheet("padding-left: 10px;")
         return button
 
+    def _tool_button(self, text, checkable=False, tip=""):
+        button = QtWidgets.QPushButton(text, self.webcam_page)
+        button.setObjectName("control_btn")
+        button.setCheckable(checkable)
+        button.setToolTip(tip)
+        return button
+
     def _setup_webcam_page(self):
         self.webcam_page = QtWidgets.QWidget()
         self.webcam_page.setObjectName("webcam_page")
@@ -168,28 +176,51 @@ class Ui_MainWindow(object):
         layout.setSpacing(6)
 
         bar = QtWidgets.QHBoxLayout()
-        bar.setSpacing(10)
+        bar.setSpacing(8)
         self.camera_label = QtWidgets.QLabel("Камера:", self.webcam_page)
         self.camera_box = QtWidgets.QComboBox(self.webcam_page)
         self.camera_box.addItems(["0", "1", "2", "3"])
         self.camera_box.setToolTip("Номер камеры. Если видео не появилось, выберите другой номер.")
-        self.control_btn = QtWidgets.QPushButton("Остановить управление", self.webcam_page)
-        self.control_btn.setObjectName("control_btn")
-        self.control_btn.setCheckable(True)
-        self.control_btn.setToolTip("Пауза: жесты видны на экране, но компьютером не управляют.")
-        self.top_check = QtWidgets.QCheckBox("Поверх всех окон", self.webcam_page)
-        self.top_check.setToolTip("Окно с клавиатурой останется видно над другими программами.")
+        self.control_btn = self._tool_button("Остановить управление", checkable=True,
+                                             tip="Пауза: жесты видны на экране, но компьютером не управляют.")
+        self.keyboard_btn = self._tool_button("Клавиатура", tip="Показать экранную клавиатуру поверх рабочего стола "
+                                                                "(то же делает жест «три пальца»).")
+        self.painter_btn = self._tool_button("Графический редактор", tip="Рисовать пальцем на картинке с камеры "
+                                                                         "(то же делает жест «указательный и мизинец»).")
+        self.mini_btn = self._tool_button("Свернуть в мини-окно", tip="Свернуть программу: останется маленькое окно "
+                                                                      "поверх всех окон, жесты продолжают работать.")
         bar.addWidget(self.camera_label)
         bar.addWidget(self.camera_box)
-        bar.addSpacing(8)
-        bar.addWidget(self.control_btn)
-        bar.addWidget(self.top_check)
+        bar.addSpacing(6)
+        for widget in (self.control_btn, self.keyboard_btn, self.painter_btn, self.mini_btn):
+            bar.addWidget(widget)
         bar.addStretch(1)
+        layout.addLayout(bar)
+
+        bar2 = QtWidgets.QHBoxLayout()
+        bar2.setSpacing(8)
+        self.top_check = QtWidgets.QCheckBox("Поверх всех окон", self.webcam_page)
+        self.top_check.setToolTip("Окно программы останется видно над другими программами.")
+        self.reach_label = QtWidgets.QLabel("Чувствительность: 5", self.webcam_page)
+        self.reach_slider = QtWidgets.QSlider(Qt.Horizontal, self.webcam_page)
+        self.reach_slider.setRange(1, 10)
+        self.reach_slider.setValue(5)
+        self.reach_slider.setFixedWidth(150)
+        self.reach_slider.setToolTip("Чем больше, тем меньше нужно двигать рукой, чтобы дойти до краёв экрана.\n"
+                                     "Розовая рамка на видео - зона, в которой рука управляет курсором.")
         self.status_label = QtWidgets.QLabel("", self.webcam_page)
         self.status_label.setObjectName("status_label")
         self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        bar.addWidget(self.status_label)
-        layout.addLayout(bar)
+        self.stats_label = QtWidgets.QLabel("", self.webcam_page)
+        self.stats_label.setObjectName("stats_label")
+        bar2.addWidget(self.top_check)
+        bar2.addSpacing(10)
+        bar2.addWidget(self.reach_label)
+        bar2.addWidget(self.reach_slider)
+        bar2.addStretch(1)
+        bar2.addWidget(self.status_label)
+        bar2.addWidget(self.stats_label)
+        layout.addLayout(bar2)
 
         self.img_label = QtWidgets.QLabel(self.webcam_page)
         self.img_label.setObjectName("img_label")

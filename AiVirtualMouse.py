@@ -3,13 +3,18 @@
 Состояние хранится в old_combo, как в дипломе. Из каждого состояния можно перейти только
 в некоторые другие (схема на рисунке 18), поэтому случайный жест не запустит чужую функцию:
 
-    basic (раскрытая ладонь) - базовое состояние, из него идут все остальные;
+    basic (раскрытая ладонь) - базовое состояние;
     move_mouse -> left_click / right_click / took (перетаскивание);
-    scroll, volume_control, ai_keyboard (виртуальная клавиатура), ai_painter (рисование).
+    scroll, volume_control, ai_painter (графический редактор).
+
+Виртуальная клавиатура - не состояние, а окно поверх рабочего стола: жест «три пальца» просит окно
+программы её показать (on_request), а рука при этом продолжает двигать курсор и нажимать клавиши.
+Клавиатуру и редактор можно открыть из любого состояния, кроме «взятого» перетаскиваемого объекта.
 
 Пальцы записываются как [большой, указательный, средний, безымянный, мизинец], 1 - поднят.
 Положение большого пальца по камере определяется хуже остальных, поэтому там, где он не нужен
 для отличия одного жеста от другого, он не учитывается (в таблице GESTURES стоит None).
+Все выдержки времени заданы в секундах, а не в кадрах: на слабом компьютере камера даёт 10 кадров/с вместо 30.
 """
 import time
 
@@ -19,14 +24,13 @@ from AiPainter import AiPainter
 from GestureFunction import CollectionGesture
 from SystemInput import SystemInput
 from WorkingHand import handDetector
-from webcamKeyboard import VirtualKeyboard
 
 HUD_COLOR = (255, 51, 102)   # BGR, сине-фиолетовый как у надписи «13 - basic» на рисунках диплома
 
 # Жесты. None - положение этого пальца не важно.
 GESTURES = {
     "palm":   [1, 1, 1, 1, 1],        # базовое состояние
-    "open4":  [None, 1, 1, 1, 1],     # четыре пальца: выход из клавиатуры и рисования
+    "open4":  [None, 1, 1, 1, 1],     # четыре пальца: выход из рисования
     "four":   [0, 1, 1, 1, 1],        # прокрутка страницы
     "peace":  [None, 1, 1, 0, 0],     # движение мыши, двойной клик
     "middle": [None, 0, 1, 0, 0],     # левая кнопка мыши
@@ -36,13 +40,13 @@ GESTURES = {
     "three":  [None, 1, 1, 1, 0],     # виртуальная клавиатура
     "rock":   [None, 1, 0, 0, 1],     # графический редактор
 }
-# Сколько кадров подряд жест должен продержаться, чтобы сработать (при 30 кадрах/с кадр - 33 мс)
-HOLD = {"palm": 1, "open4": 10, "four": 8, "peace": 1, "middle": 3, "index": 3,
-        "fist": 8, "gun": 6, "three": 8, "rock": 8}
+# Сколько секунд жест должен продержаться, чтобы сработать (сверх того, что он уже принят без «мигания»)
+HOLD = {"palm": 0.0, "open4": 0.5, "four": 0.4, "peace": 0.0, "middle": 0.15, "index": 0.15,
+        "fist": 0.4, "gun": 0.3, "three": 0.6, "rock": 0.6}
 
 MOVABLE = ("basic", "move_mouse", "left_click", "right_click", "took", "scroll", "volume_control")
 NEUTRAL = ("basic", "scroll", "volume_control")
-SPECIAL = ("ai_keyboard", "ai_painter")
+OPENABLE = ("basic", "move_mouse", "left_click", "right_click", "scroll", "volume_control")
 
 
 def match(fingers, name):
@@ -82,28 +86,49 @@ class GestureStabilizer:
 class VirtualMouse:
     """Один экземпляр на программу. process(кадр) -> кадр с подписями, действия выполняются в ОС."""
 
-    LOST_FRAMES = 15      # столько кадров без руки, и перетаскивание отпускается (полсекунды)
-    RESET_FRAMES = 5      # без руки дольше - жесты распознаются заново
+    LOST_SECONDS = 0.5    # столько секунд без руки, и перетаскивание отпускается
+    RESET_SECONDS = 0.15  # без руки дольше - жесты распознаются заново
+    REQUEST_PAUSE = 2.0   # секунд между двумя просьбами показать клавиатуру
 
-    def __init__(self, detector=None, os_input=None, mirror=True, clock=time.monotonic):
+    def __init__(self, detector=None, os_input=None, mirror=True, clock=time.monotonic, on_request=None):
         self.os = os_input or SystemInput()
         self.detector = detector or handDetector(maxHands=1)
         self.gesture = CollectionGesture(os_input=self.os, clock=clock)
-        self.keyboard = VirtualKeyboard(os_input=self.os, clock=clock)
-        self.painter = AiPainter()
+        self.painter = AiPainter(clock=clock)
         self.stabilizer = GestureStabilizer()
         self.mirror = mirror              # зеркальное изображение: рука вправо - курсор вправо
         self.clock = clock
+        self.on_request = on_request      # функция(имя): окну нужно показать «keyboard»
+        self.keyboard_visible = False     # окно клавиатуры сейчас на экране (сообщает окно программы)
         self.old_combo = "basic"
         self.basic_len = None
-        self.counts = {name: 0 for name in GESTURES}
         self.fingers = None
-        self._lost = 0
-        self._wait_release = False   # после выхода из клавиатуры/рисования жест «четыре пальца» надо сначала отпустить
+        self._since = {name: None for name in GESTURES}
+        self._lost_since = None
+        self._wait_release = False   # после выхода из рисования жест «четыре пальца» надо сначала отпустить
+        self._next_request = 0.0
+        self._pending = []           # команды из окна программы, выполняются в потоке жестов
         self._fps = 0.0
         self._last_time = None
 
-    # --- управление -------------------------------------------------------
+    # --- управление из окна ----------------------------------------------
+    def post(self, command, value=None):
+        """Команда из другого потока (кнопки окна): 'painter' True/False, 'keyboard_visible' True/False, 'reach' 0.05..0.4."""
+        self._pending.append((command, value))
+
+    def _apply_pending(self):
+        while self._pending:
+            command, value = self._pending.pop(0)
+            if command == "painter":
+                if value:
+                    self._enter("ai_painter")
+                elif self.old_combo == "ai_painter":
+                    self._enter("basic")
+            elif command == "keyboard_visible":
+                self.keyboard_visible = bool(value)
+            elif command == "reach":
+                self.gesture.frameR = min(max(float(value), 0.03), 0.45)
+
     def set_enabled(self, enabled):
         """Пауза: жесты видны на экране, но компьютером не управляют."""
         self.os.enabled = enabled
@@ -114,6 +139,10 @@ class VirtualMouse:
         self.gesture.drop()
         self.detector.close()
 
+    def _request(self, name):
+        if self.on_request:
+            self.on_request(name)
+
     def _enter(self, state):
         if state == self.old_combo:
             return
@@ -121,9 +150,7 @@ class VirtualMouse:
             self.gesture.drop()
         if self.old_combo == "scroll":
             self.gesture.scroll_reset()
-        if self.old_combo == "ai_keyboard":
-            self.keyboard.reset()
-        if self.old_combo == "ai_painter":
+        if state == "ai_painter" or self.old_combo == "ai_painter":
             self.painter.reset()
         if state == "move_mouse":
             self.gesture.disarm_double_click()   # двойной клик только после того, как пальцы были разведены
@@ -131,6 +158,7 @@ class VirtualMouse:
 
     # --- кадр -------------------------------------------------------------
     def process(self, img):
+        self._apply_pending()
         if self.mirror:
             img = cv2.flip(img, 1)
         now = self.clock()
@@ -143,39 +171,48 @@ class VirtualMouse:
         lmList, _ = self.detector.findPosition(img, draw=False)
         fingers = None
         if len(lmList) >= 21:
-            self._lost = 0
+            self._lost_since = None
             fingers = self.stabilizer.update(self.detector.halfFingersUp())
         else:
             lmList = []
-            self._lost += 1
-            if self._lost == self.RESET_FRAMES:
+            if self._lost_since is None:
+                self._lost_since = now
+            lost = now - self._lost_since
+            if lost >= self.RESET_SECONDS:
                 self.stabilizer.reset()
-            if self._lost == self.LOST_FRAMES and self.old_combo == "took":
+            if lost >= self.LOST_SECONDS and self.old_combo == "took":
                 self._enter("basic")
         self.fingers = fingers
         for name in GESTURES:
-            self.counts[name] = self.counts[name] + 1 if match(fingers, name) else 0
+            if match(fingers, name):
+                if self._since[name] is None:
+                    self._since[name] = now
+            else:
+                self._since[name] = None
 
-        img = self._step(img, lmList, fingers)
+        img = self._step(img, lmList, fingers, now)
         self._hud(img)
         return img
 
-    def _held(self, name):
-        return self.counts[name] >= HOLD[name]
+    def _held(self, name, now):
+        since = self._since[name]
+        return since is not None and now - since >= HOLD[name]
 
-    def _step(self, img, lmList, f):
+    def _step(self, img, lmList, f, now):
         st = self.old_combo
         d = self.detector
 
-        # --- особые состояния: у них своя отрисовка, выход - четыре пальца вверх
-        if st in SPECIAL:
-            if lmList and self._held("open4"):
+        # --- графический редактор: у него своя отрисовка; выход - «Назад» или четыре пальца вверх
+        if st == "ai_painter":
+            if lmList and self._held("open4", now):
                 self._enter("basic")
                 self._wait_release = True
                 return img
-            if st == "ai_keyboard":
-                return self.keyboard.main(img, lmList, d)
-            return self.painter.main(img, lmList, f)
+            img = self.painter.main(img, lmList, f, now)
+            if self.painter.exit_requested:
+                self.painter.exit_requested = False
+                self._enter("basic")
+            return img
 
         if not lmList or f is None:
             return img
@@ -189,30 +226,32 @@ class VirtualMouse:
         if match(f, "palm"):                     # базовое состояние, запоминаем длину пальца
             self._enter("basic")
             self.basic_len = self.gesture.basic(img, d)
-        elif st in ("basic", "volume_control") and self._held("gun"):
+        elif st in OPENABLE and not self.keyboard_visible and self._held("three", now) and now >= self._next_request:
+            self.keyboard_visible = True         # окно подтвердит или сбросит это сообщением 'keyboard_visible'
+            self._next_request = now + self.REQUEST_PAUSE
+            self._request("keyboard")
+        elif st in OPENABLE and self._held("rock", now):
+            self._enter("ai_painter")
+        elif st in ("basic", "volume_control") and self._held("gun", now):
             self._enter("volume_control")
             self.gesture.volume_control(img, lmList)
-        elif st in NEUTRAL and self._held("four") and match(f, "four"):
+        elif st in NEUTRAL and self._held("four", now) and match(f, "four"):
             self._enter("scroll")
             self.gesture.hscroll(img, y1)
         elif st == "scroll" and match(f, "four"):
             self.gesture.hscroll(img, y1)
-        elif st in NEUTRAL and self._held("three"):
-            self._enter("ai_keyboard")
-        elif st in NEUTRAL and self._held("rock"):
-            self._enter("ai_painter")
         elif match(f, "peace") and st in MOVABLE and self._finger_ok(img):
             self._enter("move_mouse")
             if not self.gesture.fingers_closed(d):
                 self.gesture.moveMouse(img, d, x1, y1)
             self.gesture.double_click(img, d, x1, y1)
-        elif st == "move_mouse" and self._held("middle") and match(f, "middle"):
+        elif st == "move_mouse" and self._held("middle", now) and match(f, "middle"):
             self.gesture.left_click()
             self._enter("left_click")
-        elif st == "move_mouse" and self._held("index") and match(f, "index"):
+        elif st == "move_mouse" and self._held("index", now) and match(f, "index"):
             self.gesture.right_click()
             self._enter("right_click")
-        elif st == "move_mouse" and self._held("fist"):
+        elif st == "move_mouse" and self._held("fist", now):
             self.gesture.drag_and_drop()
             self._enter("took")
             self.gesture.moveMouse(img, d, x1, y1)
@@ -236,8 +275,8 @@ class VirtualMouse:
 def main(cam_index=0):
     """Запуск без окна программы: обычное окно OpenCV, выход - клавиша q. Удобно для проверки камеры."""
     cap = cv2.VideoCapture(cam_index)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     mouse = VirtualMouse()
     try:
         while True:

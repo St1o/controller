@@ -75,12 +75,14 @@ class FakeBackend:
 class Rig:
     """Программа целиком с поддельными камерой и ОС. feed() показывает жест несколько кадров подряд."""
 
-    def __init__(self):
+    def __init__(self, fps=30.0):
         self.os = FakeInput()
         self.backend = FakeBackend()
         self.time = 0.0
+        self.dt = 1.0 / fps
+        self.requests = []      # что жесты попросили показать окно: 'keyboard'
         self.mouse = VirtualMouse(detector=handDetector(backend=self.backend), os_input=self.os,
-                                  clock=lambda: self.time)
+                                  clock=lambda: self.time, on_request=self.requests.append)
         self.frame = None
 
     @property
@@ -94,14 +96,14 @@ class Rig:
             if tweak:
                 pts = tweak(pts)
             self.backend.points = pts
-            self.time += 1 / 30.0
+            self.time += self.dt
             self.frame = self.mouse.process(np.zeros((H, W, 3), np.uint8))
         return self.frame
 
     def no_hand(self, frames=3):
         self.backend.points = None
         for _ in range(frames):
-            self.time += 1 / 30.0
+            self.time += self.dt
             self.frame = self.mouse.process(np.zeros((H, W, 3), np.uint8))
         return self.frame
 

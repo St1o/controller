@@ -157,7 +157,7 @@ class MouseTest(unittest.TestCase):
         rig = self.rig
         rig.open_palm()
         rig.feed(PEACE, at=(W * 0.3, H * 0.5), frames=30)
-        rig.feed(FIST, at=(W * 0.3, H * 0.5), frames=15)
+        rig.feed(FIST, at=(W * 0.3, H * 0.5), frames=25)
         self.assertEqual(rig.state, "took")
         self.assertEqual(rig.os.of("down"), [("down", "left")])
         start = rig.os.pos
@@ -172,7 +172,7 @@ class MouseTest(unittest.TestCase):
         rig = self.rig
         rig.open_palm()
         rig.feed(PEACE, frames=12)
-        rig.feed(FIST, frames=15)
+        rig.feed(FIST, frames=25)
         self.assertEqual(rig.state, "took")
         rig.no_hand(frames=20)
         self.assertEqual(rig.os.of("up"), [("up", "left")])
@@ -182,7 +182,7 @@ class MouseTest(unittest.TestCase):
         rig = self.rig
         rig.open_palm()
         rig.feed(PEACE, frames=12)
-        rig.feed(FIST, frames=15)
+        rig.feed(FIST, frames=25)
         rig.feed(PEACE, frames=6)
         self.assertEqual(rig.os.of("up"), [("up", "left")])
         self.assertEqual(rig.state, "move_mouse")
@@ -191,7 +191,7 @@ class MouseTest(unittest.TestCase):
         rig = self.rig
         rig.open_palm()
         rig.feed(PEACE, frames=12)
-        rig.feed(FIST, frames=15)
+        rig.feed(FIST, frames=25)
         rig.mouse.shutdown()
         self.assertEqual(rig.os.of("up"), [("up", "left")])
 
@@ -212,17 +212,20 @@ class MouseTest(unittest.TestCase):
     def test_scroll_faster_when_hand_is_farther_from_middle(self):
         rig = self.rig
         rig.open_palm()
-        rig.feed(FOUR, at=(W // 2, int(H * 0.34)), frames=14)
+        rig.feed(FOUR, at=(W // 2, H // 2), frames=25)          # вошли в прокрутку, рука в середине
+        self.assertEqual(rig.state, "scroll")
+        rig.feed(FOUR, at=(W // 2, int(H * 0.34)), frames=12)
         near = [c[1] for c in rig.os.of("scroll")]
         rig.os.calls.clear()
-        rig.feed(FOUR, at=(W // 2, int(H * 0.10)), frames=10)
+        rig.feed(FOUR, at=(W // 2, int(H * 0.10)), frames=12)
         far = [c[1] for c in rig.os.of("scroll")]
+        self.assertTrue(near and far)
         self.assertGreater(sum(far) / len(far), sum(near) / len(near))
 
     def test_scroll_stops_when_leaving_scroll_gesture(self):
         rig = self.rig
         rig.open_palm()
-        rig.feed(FOUR, at=(W // 2, int(H * 0.2)), frames=15)
+        rig.feed(FOUR, at=(W // 2, int(H * 0.2)), frames=30)
         rig.feed(PEACE, at=(W // 2, int(H * 0.2)), frames=6)
         rig.os.calls.clear()
         rig.feed(PEACE, at=(W // 2, int(H * 0.2)), frames=6)

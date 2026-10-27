@@ -56,16 +56,19 @@ class CollectionGesture:
     SCROLL_FAR = 0.15           # дальше этого от середины прокрутка быстрая
     SCROLL_SLOW, SCROLL_FAST = 600, 1200   # единиц колеса в секунду (120 единиц = один щелчок)
 
+    SMOOTH_TIME = 0.09          # секунд: за это время курсор проходит около 63% пути до руки (не зависит от FPS)
+
     def __init__(self, basic_lenght_finger=50, plocX=0, plocY=0, old_vol=0,
-                 os_input=None, smoothing=5, frameR=0.15, clock=time.monotonic):
+                 os_input=None, smoothing=None, frameR=0.22, clock=time.monotonic):
         self.basic_lenght_finger = basic_lenght_finger
         self.plocX = plocX
         self.plocY = plocY
         self.old_vol = old_vol
         self.os = os_input or SystemInput()
-        self.smoothing = smoothing      # чем больше, тем плавнее и медленнее курсор
-        self.frameR = frameR            # доля кадра по краям, которая не используется
+        self.smooth_time = smoothing if smoothing is not None else self.SMOOTH_TIME   # больше - плавнее и медленнее
+        self.frameR = frameR            # доля кадра по краям, которая не используется (зона руки = остальное)
         self.clock = clock
+        self._last_move = None
         self.dragging = False
         self._screen = None
         self._seeded = False
@@ -99,11 +102,17 @@ class CollectionGesture:
         wScr, hScr = self.screen
         x3 = np.interp(x1, (fx, w - fx), (0, wScr))
         y3 = np.interp(y1, (fy, h - fy), (0, hScr))
+        now = self.clock()
         if not self._seeded:   # начинаем с того места, где курсор стоит сейчас
             self.plocX, self.plocY = self.os.position()
             self._seeded = True
-        clocX = self.plocX + (x3 - self.plocX) / self.smoothing
-        clocY = self.plocY + (y3 - self.plocY) / self.smoothing
+            self._last_move = None
+        # сглаживание по времени, а не по кадрам: при 10 кадрах/с курсор не отстаёт в три раза сильнее, чем при 30
+        dt = 1.0 / 30 if self._last_move is None else min(max(now - self._last_move, 0.0), 0.2)
+        self._last_move = now
+        alpha = 1.0 - math.exp(-dt / self.smooth_time)
+        clocX = self.plocX + (x3 - self.plocX) * alpha
+        clocY = self.plocY + (y3 - self.plocY) * alpha
         if abs(clocX - self.plocX) >= 1 or abs(clocY - self.plocY) >= 1:   # дрожание меньше пикселя не передаём
             self.os.move(clocX, clocY)
             self.plocX, self.plocY = clocX, clocY

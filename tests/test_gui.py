@@ -38,10 +38,23 @@ class WindowTest(unittest.TestCase):
         from main import MainWindow
         self.capture = capture
         self.mouse_input = FakeInput()
-        factory = mouse or (lambda: VirtualMouse(detector=handDetector(backend=FakeBackend()), os_input=self.mouse_input))
-        window = MainWindow(capture_factory=lambda index: self.capture, mouse_factory=factory)
+        self.mice = []
+
+        def default_factory():
+            m = VirtualMouse(detector=handDetector(backend=FakeBackend()), os_input=self.mouse_input)
+            self.mice.append(m)
+            return m
+        window = MainWindow(capture_factory=lambda index: self.capture, mouse_factory=mouse or default_factory,
+                            input_factory=FakeInput)
         self.addCleanup(window.close)
         return window
+
+    def wait_for(self, condition, tries=80):
+        for _ in range(tries):
+            QtTest.QTest.qWait(50)
+            if condition():
+                return True
+        return condition()
 
     def click(self, widget):
         QtTest.QTest.mouseClick(widget, QtCore.Qt.LeftButton)
@@ -116,6 +129,68 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(w.ui.control_btn.text(), "Включить управление")
         self.click(w.ui.control_btn)
         self.assertTrue(w.worker.control)
+
+    # --- свёрнутое окно, мини-окно, клавиатура, рисовалка ---------------------------
+    def test_minimize_shows_mini_window_with_video_and_restore_hides_it(self):
+        w = self.make(capture=FakeCapture())
+        w.show()
+        w.showMinimized()
+        self.assertTrue(self.wait_for(lambda: w.mini is not None and w.mini.isVisible()))
+        self.assertTrue(w.isMinimized())
+        self.assertTrue(self.wait_for(lambda: w.mini.video.pixmap() is not None and not w.mini.video.pixmap().isNull()))
+        self.assertTrue(w.worker.isRunning())                     # камера запустилась сама, хотя вкладку не открывали
+        w.mini.restore_requested.emit()
+        self.assertTrue(self.wait_for(lambda: not w.mini.isVisible()))
+        self.assertFalse(w.isMinimized())
+
+    def test_mini_window_pause_matches_main_pause_button(self):
+        w = self.make(capture=FakeCapture())
+        w.show()
+        w.showMinimized()
+        self.assertTrue(self.wait_for(lambda: w.mini is not None and w.mini.isVisible()))
+        w.mini.on_key(w.mini.pause_key)
+        self.assertTrue(w.ui.control_btn.isChecked())
+        self.assertTrue(self.wait_for(lambda: not w.worker.control))
+        w.mini.on_key(w.mini.pause_key)
+        self.assertFalse(w.ui.control_btn.isChecked())
+
+    def test_gesture_request_opens_keyboard_window_and_back_button_tells_gestures(self):
+        w = self.make(capture=FakeCapture())
+        self.click(w.ui.webcam_btn)
+        self.assertTrue(self.wait_for(lambda: bool(self.mice)))
+        w.worker.request.emit("keyboard")                         # так жест «три пальца» просит окно
+        self.assertTrue(self.wait_for(lambda: w.osk is not None and w.osk.isVisible()))
+        self.assertTrue(self.wait_for(lambda: self.mice[0].keyboard_visible))
+        w.osk.hide_keyboard()
+        self.assertTrue(self.wait_for(lambda: not self.mice[0].keyboard_visible))
+
+    def test_keyboard_button_in_toolbar_opens_keyboard(self):
+        w = self.make(capture=FakeCapture())
+        self.click(w.ui.keyboard_btn)
+        self.assertTrue(w.osk.isVisible())
+        self.assertEqual(w.osk.os, w.input)
+
+    def test_painter_button_opens_painter_on_camera_page(self):
+        w = self.make(capture=FakeCapture())
+        self.click(w.ui.painter_btn)
+        self.assertIs(w.ui.stackedWidget.currentWidget(), w.ui.webcam_page)
+        self.assertTrue(self.wait_for(lambda: bool(self.mice) and self.mice[0].old_combo == "ai_painter"))
+
+    def test_sensitivity_slider_changes_hand_zone(self):
+        from main import reach_to_margin
+        w = self.make(capture=FakeCapture())
+        self.click(w.ui.webcam_btn)
+        self.assertTrue(self.wait_for(lambda: bool(self.mice)))
+        w.ui.reach_slider.setValue(9)
+        self.assertTrue(self.wait_for(lambda: abs(self.mice[0].gesture.frameR - reach_to_margin(9)) < 1e-9))
+        self.assertIn("9", w.ui.reach_label.text())
+        self.assertGreater(reach_to_margin(10), reach_to_margin(1))
+
+    def test_toolbar_has_mini_button(self):
+        w = self.make()
+        w.show()
+        self.click(w.ui.mini_btn)
+        self.assertTrue(self.wait_for(lambda: w.isMinimized()))
 
     def test_error_while_video_runs_goes_to_status_line(self):
         w = self.make(capture=FakeCapture())
