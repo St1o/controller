@@ -68,7 +68,9 @@ class WindowTest(unittest.TestCase):
         self.assertIs(ui.stackedWidget.currentWidget(), ui.instruction_page)
         self.click(ui.about_btn)
         self.assertIs(ui.stackedWidget.currentWidget(), ui.about_page)
-        self.assertEqual(ui.bottom_label.text(), "Version 1.0 | Cooperating Egipko")
+        self.assertEqual(ui.bottom_label.text(), "Version 1.0")          # без имени автора
+        self.assertNotIn("Egipko", ui.bottom_label.text())
+        self.assertEqual(ui.about_label.text(), "Программное обеспечение для управления операционной системой посредством жестов рук")
         self.assertEqual(w.windowTitle(), "VMouse")
 
     def test_menu_slides_between_wide_and_narrow(self):

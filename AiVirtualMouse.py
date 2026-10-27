@@ -141,7 +141,7 @@ class VirtualMouse:
         self.detector.close()
 
     def _flash(self, label, now):
-        """Показать в углу кадра, что сработало (двойной клик и правый клик сгибом состояния не меняют)."""
+        """Показать в углу кадра, что сработало (двойной клик и левый клик сгибом состояния не меняют)."""
         self._flash_label = (label, now + 0.8)
 
     def _request(self, name):
@@ -159,7 +159,7 @@ class VirtualMouse:
             self.painter.reset()
         if state == "move_mouse":
             self.gesture.disarm_double_click()   # двойной клик только после того, как пальцы были разведены
-            self.gesture.disarm_bend_click()     # правый клик сгибом - только после того, как палец был прямым
+            self.gesture.disarm_bend_click()     # левый клик сгибом - только после того, как палец был прямым
         self.old_combo = state
 
     # --- кадр -------------------------------------------------------------
@@ -248,11 +248,11 @@ class VirtualMouse:
             self.gesture.hscroll(img, d)
         elif match(f, "peace") and st in MOVABLE and self._finger_ok(img):
             self._enter("move_mouse")
-            # пока указательный согнут (правый клик) или пальцы сведены (двойной клик), курсор стоит на месте
+            # пока указательный согнут (левый клик) или пальцы сведены (двойной клик), курсор стоит на месте
             still = self.gesture.index_bent(d) or self.gesture.fingers_closed(d)
             self.gesture.moveMouse(img, d, x1, y1, move=not still)
             if self.gesture.index_bend_click(d):
-                self._flash("right_click", now)
+                self._flash("left_click", now)
             elif self.gesture.double_click(img, d, x1, y1):
                 self._flash("double_click", now)
         elif st == "move_mouse" and self._held("middle", now) and match(f, "middle"):

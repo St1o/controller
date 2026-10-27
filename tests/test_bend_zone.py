@@ -59,36 +59,37 @@ class DetectorMeasuresTest(unittest.TestCase):
             self.assertEqual(detector_for(FOUR, spread=spread).halfFingersUp(), FOUR, spread)
 
 
-class RightClickByBendTest(unittest.TestCase):
+class LeftClickByBendTest(unittest.TestCase):
     def setUp(self):
         self.rig = Rig()
         self.rig.open_palm()
         self.rig.feed(PEACE, frames=10)
 
-    def rights(self):
-        return [c for c in self.rig.os.of("click") if c[1] == "right"]
+    def lefts(self):
+        return [c for c in self.rig.os.of("click") if c[1] == "left" and c[2] == 1]
 
-    def test_holding_a_bend_is_one_right_click(self):
+    def test_holding_a_bend_is_one_left_click(self):
         self.rig.feed(PEACE, hand=BENT, frames=20)
-        self.assertEqual(self.rights(), [("click", "right", 1)])        # один раз, хотя сгиб держится долго
+        self.assertEqual(self.lefts(), [("click", "left", 1)])           # один раз, хотя сгиб держится долго
+        self.assertEqual([c for c in self.rig.os.of("click") if c[1] == "right"], [])
 
     def test_can_click_again_after_straightening(self):
         self.rig.feed(PEACE, hand=BENT, frames=15)
         self.rig.feed(PEACE, frames=6)
         self.rig.feed(PEACE, hand=BENT, frames=15)
-        self.assertEqual(len(self.rights()), 2)
+        self.assertEqual(len(self.lefts()), 2)
 
     def test_short_bend_is_not_a_click(self):
         self.rig.feed(PEACE, hand=BENT, frames=4)
         self.rig.feed(PEACE, frames=10)
-        self.assertEqual(self.rights(), [])
+        self.assertEqual(self.lefts(), [])
 
     def test_cursor_stays_while_bending(self):
         self.rig.feed(PEACE, at=(W * 0.35, H * 0.4), frames=40)
         before = self.rig.os.pos
         self.rig.feed(PEACE, at=(W * 0.35, H * 0.4), hand=BENT, frames=20)
         self.assertEqual(self.rig.os.pos, before)
-        self.assertEqual(len(self.rights()), 1)
+        self.assertEqual(len(self.lefts()), 1)
 
     def test_no_double_click_when_bending_toward_middle_finger(self):
         def close(pts):
@@ -105,14 +106,14 @@ class RightClickByBendTest(unittest.TestCase):
         self.assertEqual([c for c in rig.os.of("click")], [])
         rig.feed(PEACE, frames=5)
         rig.feed(PEACE, hand=BENT, frames=15)
-        self.assertEqual(len([c for c in rig.os.of("click") if c[1] == "right"]), 1)
+        self.assertEqual(len([c for c in rig.os.of("click") if c[1] == "left"]), 1)
 
-    def test_folding_finger_fast_for_left_click_gives_no_right_click(self):
+    def test_folding_finger_fast_for_old_left_click_gives_exactly_one_click(self):
         rig = self.rig
         for bend in (30, 60, 90):                             # палец складывается за полсекунды
             rig.feed(PEACE, hand={"bend_index": bend}, frames=1)
         rig.feed(MIDDLE, frames=14)
-        self.assertEqual(rig.os.of("click"), [("click", "left", 1)])
+        self.assertEqual(rig.os.of("click"), [("click", "left", 1)])           # не два (сгиб + старый жест)
 
     def test_old_gesture_index_only_still_right_click(self):
         rig = Rig()
@@ -124,7 +125,7 @@ class RightClickByBendTest(unittest.TestCase):
     def test_hud_shows_what_happened(self):
         frame = self.rig.feed(PEACE, hand=BENT, frames=20)
         self.assertGreater(int(np.count_nonzero(frame[:60, :500])), 0)
-        self.assertEqual(self.rig.mouse._flash_label[0], "right_click")
+        self.assertEqual(self.rig.mouse._flash_label[0], "left_click")
 
 
 class HandZoneTest(unittest.TestCase):
