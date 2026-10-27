@@ -107,6 +107,7 @@ class VirtualMouse:
         self._lost_since = None
         self._wait_release = False   # после выхода из рисования жест «четыре пальца» надо сначала отпустить
         self._next_request = 0.0
+        self._flash_label = ("", 0.0)
         self._pending = []           # команды из окна программы, выполняются в потоке жестов
         self._fps = 0.0
         self._last_time = None
@@ -139,6 +140,10 @@ class VirtualMouse:
         self.gesture.drop()
         self.detector.close()
 
+    def _flash(self, label, now):
+        """Показать в углу кадра, что сработало (двойной клик и правый клик сгибом состояния не меняют)."""
+        self._flash_label = (label, now + 0.8)
+
     def _request(self, name):
         if self.on_request:
             self.on_request(name)
@@ -154,6 +159,7 @@ class VirtualMouse:
             self.painter.reset()
         if state == "move_mouse":
             self.gesture.disarm_double_click()   # двойной клик только после того, как пальцы были разведены
+            self.gesture.disarm_bend_click()     # правый клик сгибом - только после того, как палец был прямым
         self.old_combo = state
 
     # --- кадр -------------------------------------------------------------
@@ -191,7 +197,7 @@ class VirtualMouse:
                 self._since[name] = None
 
         img = self._step(img, lmList, fingers, now)
-        self._hud(img)
+        self._hud(img, now)
         return img
 
     def _held(self, name, now):
@@ -237,14 +243,18 @@ class VirtualMouse:
             self.gesture.volume_control(img, lmList)
         elif st in NEUTRAL and self._held("four", now) and match(f, "four"):
             self._enter("scroll")
-            self.gesture.hscroll(img, y1)
+            self.gesture.hscroll(img, d)
         elif st == "scroll" and match(f, "four"):
-            self.gesture.hscroll(img, y1)
+            self.gesture.hscroll(img, d)
         elif match(f, "peace") and st in MOVABLE and self._finger_ok(img):
             self._enter("move_mouse")
-            if not self.gesture.fingers_closed(d):
-                self.gesture.moveMouse(img, d, x1, y1)
-            self.gesture.double_click(img, d, x1, y1)
+            # пока указательный согнут (правый клик) или пальцы сведены (двойной клик), курсор стоит на месте
+            still = self.gesture.index_bent(d) or self.gesture.fingers_closed(d)
+            self.gesture.moveMouse(img, d, x1, y1, move=not still)
+            if self.gesture.index_bend_click(d):
+                self._flash("right_click", now)
+            elif self.gesture.double_click(img, d, x1, y1):
+                self._flash("double_click", now)
         elif st == "move_mouse" and self._held("middle", now) and match(f, "middle"):
             self.gesture.left_click()
             self._enter("left_click")
@@ -266,9 +276,10 @@ class VirtualMouse:
             self.basic_len = length
         return length >= 0.7 * self.basic_len
 
-    def _hud(self, img):
+    def _hud(self, img, now):
         scale = 3 * max(img.shape[1] / 1280.0, 0.6)
-        cv2.putText(img, "%d - %s" % (int(self._fps), self.old_combo), (5, int(13 * scale)),
+        label = self._flash_label[0] if now < self._flash_label[1] else self.old_combo
+        cv2.putText(img, "%d - %s" % (int(self._fps), label), (5, int(13 * scale)),
                     cv2.FONT_HERSHEY_PLAIN, scale, HUD_COLOR, 2)
 
 

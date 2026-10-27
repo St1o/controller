@@ -89,10 +89,10 @@ class Rig:
     def state(self):
         return self.mouse.old_combo
 
-    def feed(self, fingers, at=(W // 2, H // 2), frames=12, scale=1.6, anchor=9, tweak=None):
+    def feed(self, fingers, at=(W // 2, H // 2), frames=12, scale=1.6, anchor=9, tweak=None, hand=None):
         """Показать жест fingers; точка anchor руки стоит в at. tweak(points) может подправить точки."""
         for _ in range(frames):
-            pts = place(make_hand(fingers, scale), anchor, *at)
+            pts = place(make_hand(fingers, scale, **(hand or {})), anchor, *at)
             if tweak:
                 pts = tweak(pts)
             self.backend.points = pts

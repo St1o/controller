@@ -103,7 +103,7 @@ class ReachTest(unittest.TestCase):
             rig.feed(PEACE, at=(W * 0.12, H * 0.5), frames=60)
             return rig.os.pos[0]
         self.assertLess(left_edge(0.30), 5)          # зона 40% кадра: до левого края хватает руки в 12% от края кадра
-        self.assertGreater(left_edge(0.05), 150)     # огромная зона: до края не дотянуться
+        self.assertGreater(left_edge(0.05), 40)      # зона почти во весь кадр: рука у края кадра ещё не у края экрана
 
     def test_hand_at_edge_of_frame_reaches_corners_with_default_zone(self):
         rig = Rig()

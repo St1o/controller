@@ -9,6 +9,7 @@ import time
 import cv2
 import numpy as np
 
+from overlay import fill_rect, put_text
 from SystemInput import SystemInput
 
 MAGENTA = (255, 0, 255)
@@ -52,9 +53,22 @@ class CollectionGesture:
     DOUBLE_CLICK_CLOSE = 0.50   # пальцы сведены: двойной клик
     DOUBLE_CLICK_OPEN = 0.70    # пальцы снова разведены: можно кликать опять
     DOUBLE_CLICK_PAUSE = 0.7    # секунд между двойными кликами
-    SCROLL_BAND = (0.40, 0.60)  # середина кадра по высоте: здесь прокрутки нет
-    SCROLL_FAR = 0.15           # дальше этого от середины прокрутка быстрая
-    SCROLL_SLOW, SCROLL_FAST = 600, 1200   # единиц колеса в секунду (120 единиц = один щелчок)
+    # Прокрутка по разведению четырёх пальцев (расстояние кончиков указательного и мизинца в долях ладони;
+    # по скринам: вместе около 0,58, врозь около 1,09). Между порогами - покой.
+    SPREAD_DOWN, SPREAD_DOWN_FAST = 0.95, 1.20     # врозь: страница вниз
+    SPREAD_UP, SPREAD_UP_FAST = 0.70, 0.46         # вместе: страница вверх
+    SCROLL_SLOW, SCROLL_FAST = 500, 1300           # единиц колеса в секунду (120 единиц = один щелчок)
+    GAUGE_RANGE = (0.35, 1.30)                     # диапазон шкалы на кадре
+    # Правый клик сгибом указательного (сумма изгибов двух суставов, градусов; по скринам: прямой около 6, согнутый около 58)
+    BEND_ON, BEND_OFF, BEND_MAX = 35, 20, 110
+    BEND_HOLD = 0.3             # секунд держать сгиб: быстрое складывание пальца для левого клика им не считается
+    STRAIGHT_MAX = 30           # палец считается прямым, пока изгиб не больше
+    BEND_REACH = 0.85           # согнутый указательный короче среднего (прямой около 0,9, по скрину согнутый около 0,66);
+                                # рука, наклонённая к камере, укорачивает оба пальца сразу и сгибом не считается
+    # Зона руки: поля растут с размером ладони, чтобы кончики пальцев и запястье оставались в кадре
+    SIDE_PALM, TOP_PALM, BOTTOM_PALM = 0.7, 1.15, 0.9
+    MIN_ZONE = 0.18             # зона не меньше этой доли кадра
+    TOO_CLOSE = 0.30            # ладонь крупнее этой доли высоты кадра: просим отодвинуть руку
 
     SMOOTH_TIME = 0.09          # секунд: за это время курсор проходит около 63% пути до руки (не зависит от FPS)
 
@@ -76,6 +90,9 @@ class CollectionGesture:
         self._dc_last = -1e9
         self._scroll_last = None
         self._volume = None
+        self._palm = None
+        self._bend_armed = True
+        self._bend_since = None
 
     # --- базовое состояние -----------------------------------------------
     def basic(self, img, detector):
@@ -90,18 +107,43 @@ class CollectionGesture:
             self._screen = self.os.screen_size()
         return self._screen
 
-    def moveMouse(self, img, detector, x1, y1):
-        """Перенести положение руки в кадре на экран: курсор идёт плавно, края кадра не используются."""
+    def hand_zone(self, w, h, palm):
+        """Зона в кадре (слева, сверху, справа, снизу), по которой ходит основание ладони и которая соответствует всему экрану.
+
+        Поля не меньше заданных ползунком, а у крупной кисти больше: чтобы, когда основание ладони у края зоны,
+        кончики пальцев и запястье ещё были в кадре. Тогда любой угол экрана достижим без потери руки.
+        """
+        m = self.frameR
+        side = max(m * w, self.SIDE_PALM * palm)
+        top = max(m * h, self.TOP_PALM * palm)
+        bottom = max(m * h, self.BOTTOM_PALM * palm)
+        if w - 2 * side < self.MIN_ZONE * w:
+            side = (w - self.MIN_ZONE * w) / 2
+        if h - top - bottom < self.MIN_ZONE * h:      # очень крупная кисть: зона сжимается, но не исчезает
+            half = self.MIN_ZONE * h / 2
+            centre = min(max((top + h - bottom) / 2, half), h - half)
+            top, bottom = centre - half, h - centre - half
+        return side, top, w - side, h - bottom
+
+    def moveMouse(self, img, detector, x1, y1, move=True):
+        """Перенести положение руки в кадре на экран: курсор идёт плавно. move=False - только показать зону."""
         h, w = img.shape[:2]
-        fx, fy = w * self.frameR, h * self.frameR
-        cv2.rectangle(img, (int(fx), int(fy)), (int(w - fx), int(h - fy)), MAGENTA, 2)
+        palm = detector.handSize() or (self._palm or 0.0)
+        self._palm = palm if self._palm is None else self._palm * 0.9 + palm * 0.1   # плавно: рука то ближе, то дальше
+        left, top, right, bottom = self.hand_zone(w, h, self._palm)
+        cv2.rectangle(img, (int(left), int(top)), (int(right), int(bottom)), MAGENTA, 2)
         cv2.circle(img, (int(x1), int(y1)), 12, GREEN, cv2.FILLED)
+        if self._palm > self.TOO_CLOSE * h:
+            put_text(img, "Отодвиньте руку от камеры", (0, int(h * 0.9), w, int(h * 0.08)),
+                     max(int(h * 0.045), 13), (60, 60, 255))
+        if not move:
+            return
         if not self.os.enabled:    # пауза: курсор не трогаем, а после паузы начнём с того места, где он стоит
             self._seeded = False
             return
         wScr, hScr = self.screen
-        x3 = np.interp(x1, (fx, w - fx), (0, wScr))
-        y3 = np.interp(y1, (fy, h - fy), (0, hScr))
+        x3 = np.interp(x1, (left, right), (0, wScr))
+        y3 = np.interp(y1, (top, bottom), (0, hScr))
         now = self.clock()
         if not self._seeded:   # начинаем с того места, где курсор стоит сейчас
             self.plocX, self.plocY = self.os.position()
@@ -140,8 +182,8 @@ class CollectionGesture:
         и прошла пауза. Возвращает True, если клик сделан.
         """
         ratio = self.double_click_pose(detector)
-        if ratio is None:
-            return False
+        if ratio is None or self.index_bent(detector) or detector.fingerBend(2) > self.STRAIGHT_MAX:
+            return False        # согнутый палец - это правый клик, а не сведение пальцев
         length, img, line = detector.findDistance(8, 12, img, draw=True)
         done = False
         now = self.clock()
@@ -159,6 +201,41 @@ class CollectionGesture:
     def disarm_double_click(self):
         """Двойной клик снова заработает только после того, как пальцы будут разведены."""
         self._dc_armed = False
+
+    # --- правый клик сгибом указательного ---------------------------------------
+    def index_bent(self, detector):
+        """Указательный палец заметно согнут (идёт сгиб для правого клика): курсор в это время не двигаем."""
+        return detector.fingerBend(1) > self.STRAIGHT_MAX
+
+    def disarm_bend_click(self):
+        """После перехода в движение правый клик заработает, только когда палец сначала выпрямлен."""
+        self._bend_armed = False
+        self._bend_since = None
+
+    def index_bend_click(self, detector):
+        """Правый клик, когда указательный согнут (средний остаётся прямым) и сгиб удерживается около 0,3 с.
+
+        Срабатывает один раз; повторно - только после того, как палец снова выпрямлен.
+        Палец, который быстро складывают в кулак (левый клик), сюда не попадает: слишком быстро и слишком сильно.
+        """
+        now = self.clock()
+        bend, middle = detector.fingerBend(1), detector.fingerBend(2)
+        if bend <= self.BEND_OFF:
+            self._bend_armed = True
+            self._bend_since = None
+            return False
+        shorter = detector.fingerReach(1) < self.BEND_REACH * max(detector.fingerReach(2), 1.0)
+        if self.BEND_ON <= bend <= self.BEND_MAX and middle <= self.STRAIGHT_MAX and shorter and self._bend_armed:
+            if self._bend_since is None:
+                self._bend_since = now
+            elif now - self._bend_since >= self.BEND_HOLD:
+                self._bend_armed = False
+                self._bend_since = None
+                self.right_click()
+                return True
+        else:
+            self._bend_since = None
+        return False
 
     def fingers_closed(self, detector):
         """Пальцы сведены (идёт двойной клик): курсор в это время не двигаем, чтобы клик попал куда целились."""
@@ -182,30 +259,52 @@ class CollectionGesture:
     def scroll_reset(self):
         self._scroll_last = None
 
-    def hscroll(self, img, y1):
-        """Прокрутка страницы по высоте руки: выше середины кадра вверх, ниже вниз.
+    def hscroll(self, img, detector):
+        """Прокрутка страницы по разведению четырёх пальцев: врозь - вниз, вместе - вверх, посередине - покой.
 
-        В середине (красный прямоугольник) прокрутки нет. Чем дальше рука от середины, тем быстрее.
-        Возвращает отправленное значение (плюс - вверх).
+        Чем сильнее пальцы разведены или сведены, тем быстрее. На кадре внизу шкала с подписями.
+        Возвращает отправленное значение (плюс - вверх, минус - вниз).
         """
         h, w = img.shape[:2]
-        top, bottom = h * self.SCROLL_BAND[0], h * self.SCROLL_BAND[1]
-        cv2.rectangle(img, (int(w * 0.25), int(top)), (int(w * 0.75), int(bottom)), RED, 2)
+        spread = detector.fingerSpread()
         now = self.clock()
         dt = 0.03 if self._scroll_last is None else min(now - self._scroll_last, 0.1)
         self._scroll_last = now
-        far = h * self.SCROLL_FAR
-        amount = 0
-        if y1 < top:
-            amount = self.SCROLL_FAST if y1 < top - far else self.SCROLL_SLOW
-        elif y1 > bottom:
-            amount = -(self.SCROLL_FAST if y1 > bottom + far else self.SCROLL_SLOW)
+        amount = 0.0
+        if spread >= self.SPREAD_DOWN:
+            amount = -float(np.interp(spread, [self.SPREAD_DOWN, self.SPREAD_DOWN_FAST], [self.SCROLL_SLOW, self.SCROLL_FAST]))
+        elif spread <= self.SPREAD_UP:
+            amount = float(np.interp(-spread, [-self.SPREAD_UP, -self.SPREAD_UP_FAST], [self.SCROLL_SLOW, self.SCROLL_FAST]))
+        sent = 0
         if amount:
-            amount = int(amount * dt) or (1 if amount > 0 else -1)
-            self.os.scroll(amount)
-            cv2.arrowedLine(img, (w // 2, int((top + bottom) / 2)),
-                            (w // 2, int((top + bottom) / 2) - (60 if amount > 0 else -60)), RED, 4, tipLength=0.4)
-        return amount
+            sent = int(amount * dt) or (1 if amount > 0 else -1)
+            self.os.scroll(sent)
+        self._draw_scroll_gauge(img, spread, sent)
+        return sent
+
+    def _draw_scroll_gauge(self, img, spread, sent):
+        """Шкала внизу кадра: вверх | покой | вниз, и где сейчас пальцы."""
+        h, w = img.shape[:2]
+        lo, hi = self.GAUGE_RANGE
+        x0, x1 = int(w * 0.18), int(w * 0.82)
+        y0, bh = int(h * 0.80), max(int(h * 0.07), 20)
+
+        def at(value):
+            return int(x0 + (min(max(value, lo), hi) - lo) / (hi - lo) * (x1 - x0))
+        fill_rect(img, (x0, y0, at(self.SPREAD_UP) - x0, bh), (220, 120, 40), 0.75)            # вверх
+        fill_rect(img, (at(self.SPREAD_UP), y0, at(self.SPREAD_DOWN) - at(self.SPREAD_UP), bh), (90, 90, 90), 0.75)
+        fill_rect(img, (at(self.SPREAD_DOWN), y0, x1 - at(self.SPREAD_DOWN), bh), (40, 40, 220), 0.75)  # вниз
+        px = max(int(h * 0.04), 12)
+        put_text(img, "ВВЕРХ (вместе)", (x0, y0 + bh, at(self.SPREAD_UP) - x0, int(px * 1.6)), px, (255, 255, 255))
+        put_text(img, "стоп", (at(self.SPREAD_UP), y0 + bh, at(self.SPREAD_DOWN) - at(self.SPREAD_UP), int(px * 1.6)), px,
+                 (255, 255, 255))
+        put_text(img, "ВНИЗ (врозь)", (at(self.SPREAD_DOWN), y0 + bh, x1 - at(self.SPREAD_DOWN), int(px * 1.6)), px,
+                 (255, 255, 255))
+        mx = at(spread)
+        cv2.rectangle(img, (mx - 3, y0 - 8), (mx + 3, y0 + bh + 8), (255, 255, 255), cv2.FILLED)
+        if sent:
+            cx, cy = w // 2, int(h * 0.25)
+            cv2.arrowedLine(img, (cx, cy), (cx, cy - (70 if sent > 0 else -70)), RED, 6, tipLength=0.4)
 
     # --- громкость --------------------------------------------------------
     def volume_control(self, img, lmList):

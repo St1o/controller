@@ -91,7 +91,7 @@ class WindowTest(unittest.TestCase):
             self.assertFalse(label.pixmap().isNull())
 
     def test_instruction_gestures_exist_in_state_machine(self):
-        for fingers, tag, title, gesture, description, vee in instruction.ENTRIES:
+        for fingers, tag, title, gesture, description, style in instruction.ENTRIES:
             self.assertTrue(any(match(fingers, name) for name in GESTURES), title)
             self.assertTrue(gesture.startswith(str(fingers)), title)        # запись жеста в тексте совпадает с картинкой
 

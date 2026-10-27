@@ -263,6 +263,35 @@ class handDetector:
         """То же, но палец считается поднятым и когда он поднят не до конца (гибче)."""
         return self._fingers(0.95)
 
+    def fingerBend(self, finger):
+        """Насколько согнут палец, в градусах: сумма изгибов в двух суставах (0 - прямой, 150 и больше - сжат).
+        finger: 1 указательный, 2 средний, 3 безымянный, 4 мизинец. По скринам: прямой около 6, согнутый на фаланге около 58."""
+        if len(self.lmList) < 21:
+            return 0.0
+        tip = self.tipIds[finger]
+        p = [(self.lmList[i][1], self.lmList[i][2]) for i in (tip - 3, tip - 2, tip - 1, tip)]
+
+        def turn(a, b, c):    # на сколько путь a-b-c отклоняется от прямой
+            ux, uy, vx, vy = b[0] - a[0], b[1] - a[1], c[0] - b[0], c[1] - b[1]
+            n = math.hypot(ux, uy) * math.hypot(vx, vy)
+            if n == 0:
+                return 0.0
+            return math.degrees(math.acos(max(-1.0, min(1.0, (ux * vx + uy * vy) / n))))
+        return turn(p[0], p[1], p[2]) + turn(p[1], p[2], p[3])
+
+    def fingerReach(self, finger):
+        """Расстояние от основания пальца до кончика в пикселях (у согнутого пальца меньше, чем у прямого)."""
+        if len(self.lmList) < 21:
+            return 0.0
+        tip = self.tipIds[finger]
+        return self._dist(tip, tip - 3)
+
+    def fingerSpread(self):
+        """Насколько разведены пальцы: расстояние между кончиками указательного и мизинца в долях ладони.
+        По скринам: пальцы вместе около 0,58, врозь около 1,09."""
+        size = self.handSize()
+        return self._dist(8, 20) / size if size else 0.0
+
     def close(self):
         try:
             self.backend.close()

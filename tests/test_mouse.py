@@ -127,30 +127,22 @@ class MouseTest(unittest.TestCase):
     def test_double_click_when_fingers_close_together(self):
         rig = self.rig
         rig.open_palm()
-
-        def close_fingers(pts):     # кончик среднего пальца к кончику указательного
-            pts = list(pts)
-            pts[12] = (pts[8][0] + 8, pts[8][1])
-            pts[11] = (pts[10][0] + 4, pts[10][1])
-            return pts
-
+        together = {"vee": False}                     # указательный и средний прямые и рядом
         rig.feed(PEACE, frames=10)                    # пальцы разведены: идёт движение
         self.assertEqual(rig.os.of("click"), [])
-        rig.feed(PEACE, frames=10, tweak=close_fingers)
+        rig.feed(PEACE, hand=together, frames=10)
         self.assertEqual(rig.os.of("click"), [("click", "left", 2)])
-        rig.feed(PEACE, frames=10, tweak=close_fingers)   # держим сведёнными: повтора нет
+        rig.feed(PEACE, hand=together, frames=10)     # держим сведёнными: повтора нет
         self.assertEqual(len(rig.os.of("click")), 1)
+        rig.feed(PEACE, frames=10)                    # развели и свели снова
+        rig.time += 1.0
+        rig.feed(PEACE, hand=together, frames=10)
+        self.assertEqual(len(rig.os.of("click")), 2)
 
     def test_no_double_click_when_entering_move_with_fingers_together(self):
         rig = self.rig
         rig.open_palm()
-
-        def close_fingers(pts):
-            pts = list(pts)
-            pts[12] = (pts[8][0] + 8, pts[8][1])
-            return pts
-
-        rig.feed(PEACE, frames=12, tweak=close_fingers)
+        rig.feed(PEACE, hand={"vee": False}, frames=12)
         self.assertEqual(rig.os.of("click"), [])
 
     def test_fist_drags_and_palm_drops(self):
@@ -195,41 +187,65 @@ class MouseTest(unittest.TestCase):
         rig.mouse.shutdown()
         self.assertEqual(rig.os.of("up"), [("up", "left")])
 
-    def test_scroll_up_down_and_dead_zone(self):
+    def test_fingers_apart_scroll_down_together_scroll_up_relaxed_stop(self):
         rig = self.rig
         rig.open_palm()
-        rig.feed(FOUR, at=(W // 2, H // 2), frames=20)         # середина кадра: прокрутки нет
+        rig.feed(FOUR, frames=25)                                  # расслабленные пальцы: вошли в прокрутку, покой
         self.assertEqual(rig.state, "scroll")
         self.assertEqual(rig.os.of("scroll"), [])
-        rig.feed(FOUR, at=(W // 2, int(H * 0.2)), frames=10)   # рука выше середины: вверх
+        rig.feed(FOUR, hand={"spread": "wide"}, frames=10)         # врозь: вниз
+        down = [c[1] for c in rig.os.of("scroll")]
+        self.assertTrue(down and all(a < 0 for a in down))
+        rig.os.calls.clear()
+        rig.feed(FOUR, hand={"spread": "together"}, frames=10)     # вместе: вверх
         up = [c[1] for c in rig.os.of("scroll")]
         self.assertTrue(up and all(a > 0 for a in up))
         rig.os.calls.clear()
-        rig.feed(FOUR, at=(W // 2, int(H * 0.8)), frames=10)   # ниже: вниз
-        down = [c[1] for c in rig.os.of("scroll")]
-        self.assertTrue(down and all(a < 0 for a in down))
+        rig.feed(FOUR, frames=10)                                  # снова расслабили: стоп
+        self.assertEqual(rig.os.of("scroll"), [])
 
-    def test_scroll_faster_when_hand_is_farther_from_middle(self):
+    def test_scroll_direction_does_not_depend_on_hand_height(self):
         rig = self.rig
         rig.open_palm()
-        rig.feed(FOUR, at=(W // 2, H // 2), frames=25)          # вошли в прокрутку, рука в середине
-        self.assertEqual(rig.state, "scroll")
-        rig.feed(FOUR, at=(W // 2, int(H * 0.34)), frames=12)
-        near = [c[1] for c in rig.os.of("scroll")]
+        rig.feed(FOUR, at=(W // 2, int(H * 0.8)), frames=25)
+        for y in (0.3, 0.5, 0.75):
+            rig.os.calls.clear()
+            rig.feed(FOUR, at=(W // 2, int(H * y)), hand={"spread": "together"}, frames=8)
+            self.assertTrue(rig.os.of("scroll") and all(c[1] > 0 for c in rig.os.of("scroll")), y)
+            rig.os.calls.clear()
+            rig.feed(FOUR, at=(W // 2, int(H * y)), hand={"spread": "wide"}, frames=8)
+            self.assertTrue(rig.os.of("scroll") and all(c[1] < 0 for c in rig.os.of("scroll")), y)
+            rig.os.calls.clear()
+            rig.feed(FOUR, at=(W // 2, int(H * y)), frames=8)       # расслабленная рука в любой точке кадра - покой
+            self.assertEqual(rig.os.of("scroll"), [], y)
+
+    def test_scroll_faster_when_fingers_are_wider(self):
+        rig = self.rig
+        rig.open_palm()
+        rig.feed(FOUR, frames=25)
+        rig.feed(FOUR, hand={"spread": "wide"}, frames=12)
+        mild = [abs(c[1]) for c in rig.os.of("scroll")]
         rig.os.calls.clear()
-        rig.feed(FOUR, at=(W // 2, int(H * 0.10)), frames=12)
-        far = [c[1] for c in rig.os.of("scroll")]
-        self.assertTrue(near and far)
-        self.assertGreater(sum(far) / len(far), sum(near) / len(near))
+        rig.feed(FOUR, hand={"spread": "very_wide"}, frames=12)
+        strong = [abs(c[1]) for c in rig.os.of("scroll")]
+        self.assertTrue(mild and strong)
+        self.assertGreater(sum(strong) / len(strong), sum(mild) / len(mild))
 
     def test_scroll_stops_when_leaving_scroll_gesture(self):
         rig = self.rig
         rig.open_palm()
-        rig.feed(FOUR, at=(W // 2, int(H * 0.2)), frames=30)
-        rig.feed(PEACE, at=(W // 2, int(H * 0.2)), frames=6)
+        rig.feed(FOUR, hand={"spread": "very_wide"}, frames=30)
+        rig.feed(PEACE, frames=6)
         rig.os.calls.clear()
-        rig.feed(PEACE, at=(W // 2, int(H * 0.2)), frames=6)
+        rig.feed(PEACE, frames=6)
         self.assertEqual(rig.os.of("scroll"), [])
+
+    def test_scroll_gauge_is_drawn(self):
+        rig = self.rig
+        rig.open_palm()
+        frame = rig.feed(FOUR, hand={"spread": "wide"}, frames=30)
+        gauge = frame[int(H * 0.80):int(H * 0.80) + 50, int(W * 0.18):int(W * 0.82)]
+        self.assertGreater(int(np.count_nonzero(gauge)), 3000)
 
     def test_volume_gesture_enters_state_only_from_basic(self):
         rig = self.rig

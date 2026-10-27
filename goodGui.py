@@ -253,11 +253,11 @@ class Ui_MainWindow(object):
         layout.addSpacing(10)
 
         self.instruction_pictures = []
-        for fingers, tag, title, gesture, description, vee in instruction.ENTRIES:
+        for fingers, tag, title, gesture, description, style in instruction.ENTRIES:
             row = QtWidgets.QHBoxLayout()
             row.setSpacing(14)
             picture = QtWidgets.QLabel(content)
-            picture.setPixmap(numpy_to_pixmap(gesture_picture(fingers, "30 - " + tag, vee=vee)))
+            picture.setPixmap(numpy_to_pixmap(gesture_picture(fingers, "30 - " + tag, **style)))
             picture.setFixedSize(375, 225)
             self.instruction_pictures.append(picture)
             row.addWidget(picture, 0, Qt.AlignTop)
