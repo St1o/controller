@@ -89,11 +89,14 @@ class WindowTest(unittest.TestCase):
         w = self.make()
         pictures = w.ui.instruction_pictures
         self.assertEqual(len(pictures), len(instruction.ENTRIES))
-        for label in pictures:
-            self.assertFalse(label.pixmap().isNull())
+        w.ui.stackedWidget.setCurrentWidget(w.ui.instruction_page)
+        self.assertFalse(pictures[0].pixmap().isNull())
+        for label in pictures[1:]:
+            self.assertTrue(label.movie().isValid())
+            self.assertGreater(label.movie().frameCount(), 1)
 
     def test_instruction_gestures_exist_in_state_machine(self):
-        for fingers, tag, title, gesture, description, style in instruction.ENTRIES:
+        for fingers, filename, title, gesture, description in instruction.ENTRIES:
             self.assertTrue(any(match(fingers, name) for name in GESTURES), title)
             self.assertTrue(gesture.startswith(str(fingers)), title)        # запись жеста в тексте совпадает с картинкой
 

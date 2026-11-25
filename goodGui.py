@@ -6,12 +6,10 @@
 """
 import os
 
-import cv2
 from PyQt5 import QtCore, QtGui, QtSvg, QtWidgets
 from PyQt5.QtCore import Qt
 
 import instruction
-from handSketch import gesture_picture
 
 ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icons")
 
@@ -54,12 +52,6 @@ def svg_icon(name, size=64):
     renderer.render(painter)
     painter.end()
     return QtGui.QIcon(pixmap)
-
-
-def numpy_to_pixmap(img_bgr):
-    rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    h, w, _ = rgb.shape
-    return QtGui.QPixmap.fromImage(QtGui.QImage(rgb.data, w, h, 3 * w, QtGui.QImage.Format_RGB888).copy())
 
 
 class Ui_MainWindow(object):
@@ -253,12 +245,20 @@ class Ui_MainWindow(object):
         layout.addSpacing(10)
 
         self.instruction_pictures = []
-        for fingers, tag, title, gesture, description, style in instruction.ENTRIES:
+        for _, filename, title, gesture, description in instruction.ENTRIES:
             row = QtWidgets.QHBoxLayout()
             row.setSpacing(14)
             picture = QtWidgets.QLabel(content)
-            picture.setPixmap(numpy_to_pixmap(gesture_picture(fingers, "30 - " + tag, **style)))
-            picture.setFixedSize(375, 225)
+            path = os.path.join(os.path.dirname(__file__), "assets", "gestures", filename)
+            picture.setFixedSize(311, 225)
+            picture.setAlignment(Qt.AlignCenter)
+            if filename.endswith(".gif"):
+                movie = QtGui.QMovie(path, parent=picture)
+                movie.setScaledSize(picture.size())
+                picture.setMovie(movie)
+            else:
+                picture.setPixmap(QtGui.QPixmap(path).scaled(
+                    picture.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
             self.instruction_pictures.append(picture)
             row.addWidget(picture, 0, Qt.AlignTop)
             text = QtWidgets.QVBoxLayout()
@@ -278,6 +278,17 @@ class Ui_MainWindow(object):
         self.instruction_scroll.setWidget(content)
         outer.addWidget(self.instruction_scroll)
         self.stackedWidget.addWidget(self.instruction_page)
+        self.stackedWidget.currentChanged.connect(self._update_instruction_movies)
+
+    def _update_instruction_movies(self, index):
+        visible = self.stackedWidget.widget(index) is self.instruction_page
+        for picture in self.instruction_pictures:
+            movie = picture.movie()
+            if movie is not None:
+                if visible:
+                    movie.start()
+                else:
+                    movie.stop()
 
     def _setup_about_page(self):
         self.about_page = QtWidgets.QWidget()
